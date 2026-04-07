@@ -15,7 +15,7 @@ from app.services.imports.models import (
 from app.services.imports.state_repository import import_batches, import_job_states
 
 
-INTERRUPTED_IMPORT_STATUSES = {"queued", "running"}
+INTERRUPTED_IMPORT_STATUSES = {"running"}
 INTERRUPTED_POSTPROCESS_STATUSES = {"post_metadata_refresh", "post_es_sync", "post_verify_index"}
 
 

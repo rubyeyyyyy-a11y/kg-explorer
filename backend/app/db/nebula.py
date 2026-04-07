@@ -13,13 +13,15 @@ from nebula3.gclient.net import ConnectionPool
 from app.config import settings
 from app.core.space_context import get_current_space
 
+NEBULA_HOSTS = settings.nebula_hosts
 NEBULA_HOST = settings.nebula_host
 NEBULA_PORT = settings.nebula_port
 NEBULA_USER = settings.nebula_user
 NEBULA_PASSWORD = settings.nebula_password
-NEBULA_SPACE = settings.nebula_space
+NEBULA_SPACE = settings.kg_default_space
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 logger = logging.getLogger(__name__)
+NEBULA_TARGETS_LABEL = ",".join(f"{host}:{port}" for host, port in NEBULA_HOSTS)
 
 
 def _safe_identifier(raw: str, fallback: str) -> str:
@@ -36,7 +38,7 @@ def _require_identifier(raw: str, field_name: str) -> str:
     raise RuntimeError(f"invalid {field_name}: {raw!r}")
 
 
-EDGE_TYPE = _safe_identifier(os.getenv("EDGE_TYPE", "REL2"), "REL2")
+EDGE_TYPE = _safe_identifier(settings.edge_type, "REL2")
 EDGE_TAG = f"`{EDGE_TYPE}`"
 
 _pool: Optional[ConnectionPool] = None
@@ -102,15 +104,15 @@ def _init_pool() -> ConnectionPool:
 
     for attempt in range(1, total_attempts + 1):
         cfg = Config()
-        cfg.max_connection_pool_size = _env_int("NEBULA_POOL_SIZE", 10)
-        _apply_timeout(cfg, _env_int("NEBULA_TIMEOUT_MS", 5000))
+        cfg.max_connection_pool_size = settings.nebula_pool_size
+        _apply_timeout(cfg, settings.nebula_timeout_ms)
 
         pool = ConnectionPool()
         try:
-            ok = pool.init([(NEBULA_HOST, NEBULA_PORT)], cfg)
+            ok = pool.init(list(NEBULA_HOSTS), cfg)
             if ok:
                 return pool
-            last_error = RuntimeError(f"Failed to init pool to {NEBULA_HOST}:{NEBULA_PORT}")
+            last_error = RuntimeError(f"Failed to init pool to {NEBULA_TARGETS_LABEL}")
         except RuntimeError as exc:
             last_error = exc
         except Exception as exc:
@@ -122,11 +124,10 @@ def _init_pool() -> ConnectionPool:
         if is_bad_status and has_next:
             wait_s = _POOL_INIT_BACKOFF_SECONDS[attempt - 1]
             logger.warning(
-                "nebula pool init retry on BAD status: attempt=%d/%d host=%s:%s wait=%.1fs error=%s",
+                "nebula pool init retry on BAD status: attempt=%d/%d targets=%s wait=%.1fs error=%s",
                 attempt,
                 total_attempts,
-                NEBULA_HOST,
-                NEBULA_PORT,
+                NEBULA_TARGETS_LABEL,
                 wait_s,
                 str(last_error),
             )
@@ -137,19 +138,18 @@ def _init_pool() -> ConnectionPool:
         if last_error is not None:
             _close_pool_safely(pool, "init_failed")
             logger.error(
-                "nebula pool init failed: host=%s:%s retries=%d error=%s",
-                NEBULA_HOST,
-                NEBULA_PORT,
+                "nebula pool init failed: targets=%s retries=%d error=%s",
+                NEBULA_TARGETS_LABEL,
                 attempt,
                 str(last_error),
                 exc_info=True,
             )
             raise RuntimeError(
-                f"Failed to init pool to {NEBULA_HOST}:{NEBULA_PORT}; retries={attempt}; last_error={last_error}"
+                f"Failed to init pool to {NEBULA_TARGETS_LABEL}; retries={attempt}; last_error={last_error}"
             ) from last_error
 
     raise RuntimeError(
-        f"Failed to init pool to {NEBULA_HOST}:{NEBULA_PORT}; retries={total_attempts}; last_error=unknown"
+        f"Failed to init pool to {NEBULA_TARGETS_LABEL}; retries={total_attempts}; last_error=unknown"
     )
 
 
@@ -180,7 +180,7 @@ def get_session(*, user: str | None = None, password: str | None = None):
     pool = _ensure_pool()
     session = pool.get_session(user or NEBULA_USER, password or NEBULA_PASSWORD)
     if not session:
-        raise RuntimeError(f"Failed to get Nebula session at {NEBULA_HOST}:{NEBULA_PORT} (check user/password)")
+        raise RuntimeError(f"Failed to get Nebula session at {NEBULA_TARGETS_LABEL} (check user/password)")
     return session
 
 
@@ -230,26 +230,24 @@ def execute_ngql(
             should_retry = attempt <= _EXECUTE_RETRY_MAX
             if should_retry:
                 logger.warning(
-                    "nebula retryable error: request_id=%s attempt=%d/%d type=%s host=%s:%s reason=%s ngql=%s",
+                    "nebula retryable error: request_id=%s attempt=%d/%d type=%s targets=%s reason=%s ngql=%s",
                     request_id,
                     attempt,
                     total_attempts,
                     type(exc).__name__,
-                    NEBULA_HOST,
-                    NEBULA_PORT,
+                    NEBULA_TARGETS_LABEL,
                     str(exc),
                     summary,
                 )
                 _invalidate_pool()
                 continue
             logger.error(
-                "nebula retry exhausted: request_id=%s attempt=%d/%d type=%s host=%s:%s reason=%s ngql=%s",
+                "nebula retry exhausted: request_id=%s attempt=%d/%d type=%s targets=%s reason=%s ngql=%s",
                 request_id,
                 attempt,
                 total_attempts,
                 type(exc).__name__,
-                NEBULA_HOST,
-                NEBULA_PORT,
+                NEBULA_TARGETS_LABEL,
                 str(exc),
                 summary,
                 exc_info=True,

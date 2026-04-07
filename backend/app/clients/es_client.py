@@ -1,11 +1,13 @@
+import base64
+import ipaddress
 import json
 import logging
 import socket
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import urlencode, urlparse
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 from app.config import settings
 from app.core.space_context import get_current_space
@@ -29,6 +31,8 @@ class ElasticsearchClient:
         self.bulk_timeout_s = max(self.timeout_s, float(bulk_timeout_ms or settings.es_bulk_timeout_ms) / 1000.0)
         self.bulk_max_actions = max(1, int(bulk_max_actions or settings.es_bulk_upsert_batch_size))
         self.bulk_max_bytes = max(16 * 1024, int(bulk_max_bytes or settings.es_bulk_upsert_max_bytes))
+        self.username = settings.es_username
+        self.password = settings.es_password
 
     @staticmethod
     def document_id(space_name: str, vid: int) -> str:
@@ -39,6 +43,19 @@ class ElasticsearchClient:
     @staticmethod
     def _resolved_space(space_name: Optional[str]) -> str:
         return str(space_name or get_current_space())
+
+    @staticmethod
+    def _should_bypass_proxy(url: str) -> bool:
+        hostname = str(urlparse(url).hostname or "").strip().lower()
+        if not hostname:
+            return False
+        if hostname == "localhost":
+            return True
+        try:
+            ip = ipaddress.ip_address(hostname)
+        except ValueError:
+            return False
+        return ip.is_loopback or ip.is_private or ip.is_link_local
 
     def _request_json(
         self,
@@ -61,11 +78,16 @@ class ElasticsearchClient:
             headers["Content-Type"] = "application/json"
         elif raw_body is not None:
             headers["Content-Type"] = content_type
+        if self.username:
+            token = base64.b64encode(f"{self.username}:{self.password}".encode("utf-8")).decode("ascii")
+            headers["Authorization"] = f"Basic {token}"
 
         req = Request(url=url, data=data, headers=headers, method=method)
+        opener = build_opener(ProxyHandler({})) if self._should_bypass_proxy(url) else None
         start = time.perf_counter()
         try:
-            with urlopen(req, timeout=timeout_s or self.timeout_s) as resp:
+            response = opener.open(req, timeout=timeout_s or self.timeout_s) if opener is not None else urlopen(req, timeout=timeout_s or self.timeout_s)
+            with response as resp:
                 body = resp.read().decode("utf-8")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")

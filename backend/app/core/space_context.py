@@ -27,11 +27,11 @@ def _space_error(status_code: int, error_code: str, message: str, field: str = "
 
 
 def get_current_space() -> str:
-    return str(_current_space.get() or settings.nebula_space)
+    return str(_current_space.get() or settings.kg_default_space)
 
 
 def set_current_space(space_name: str) -> Token:
-    return _current_space.set(str(space_name or "").strip() or settings.nebula_space)
+    return _current_space.set(str(space_name or "").strip() or settings.kg_default_space)
 
 
 def reset_current_space(token: Token) -> None:
@@ -57,11 +57,15 @@ def resolve_request_space(request: Request) -> ResolvedSpace:
     if header_value is None or not str(header_value).strip():
         registry_service.register_default_space()
         return ResolvedSpace(
-            space_name=settings.nebula_space,
+            space_name=settings.kg_default_space,
             source="default",
             header_present=False,
             header_value=header_value,
-            registry_status=(registry_service.get_space(settings.nebula_space).status if registry_service.get_space(settings.nebula_space) else None),
+            registry_status=(
+                registry_service.get_space(settings.kg_default_space).status
+                if registry_service.get_space(settings.kg_default_space)
+                else None
+            ),
         )
 
     try:

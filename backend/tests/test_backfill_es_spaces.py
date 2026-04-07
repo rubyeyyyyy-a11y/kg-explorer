@@ -2,6 +2,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from app.services.spaces import registry_service
 from app.services.spaces.models import SpaceSummary
@@ -226,6 +227,76 @@ class BackfillEsSpacesTest(unittest.TestCase):
         self.assertTrue(removed)
         self.assertNotIn("demo_kg", payload["spaces"])
         self.assertIn("space_a", payload["spaces"])
+
+    def test_run_backfill_replays_full_completion_state_without_nebula_scan(self):
+        state_path = Path(self.tmpdir) / "state.json"
+        state_payload = {
+            "format_version": "es-backfill-v2",
+            "spaces": {
+                "demo_kg": {
+                    "cursor": 100,
+                    "indexed_total": 100,
+                    "last_vid": 100,
+                    "status": "verified_nonempty",
+                    "nebula_entity_count": 100,
+                    "es_doc_count": 100,
+                    "coverage_pct": 100.0,
+                    "full_completion": True,
+                }
+            },
+        }
+
+        class FakeEsClient:
+            def count_documents_missing_space(self, *_args, **_kwargs):
+                return 0, 1.0
+
+            def count_documents_for_space(self, *_args, **_kwargs):
+                return 100, 12.3
+
+        with (
+            mock.patch.object(
+                backfill_es_spaces.indexing_service,
+                "verify_space",
+                return_value={
+                    "ok": True,
+                    "doc_count": 100,
+                    "sample_ids_ok": True,
+                    "sample_space_ok": True,
+                    "sample_query_ok": True,
+                },
+            ),
+            mock.patch.object(
+                backfill_es_spaces.indexing_service,
+                "iter_entity_doc_batches",
+                side_effect=AssertionError("iter_entity_doc_batches should not run for full completion replay"),
+            ),
+            mock.patch.object(
+                backfill_es_spaces.index_status_service,
+                "resolve_entity_count",
+                side_effect=AssertionError("resolve_entity_count should not run for full completion replay"),
+            ),
+        ):
+            summary = backfill_es_spaces.run_backfill_for_space(
+                "demo_kg",
+                batch_size=500,
+                max_docs=5000,
+                dry_run=False,
+                verify=True,
+                resume=True,
+                state_path=state_path,
+                state_payload=state_payload,
+                es_client=FakeEsClient(),
+                index_name=None,
+            )
+
+        self.assertEqual(summary["status"], "verified_nonempty")
+        self.assertTrue(summary["full_completion"])
+        self.assertEqual(summary["docs"], 0)
+        self.assertEqual(summary["nebula_count_source"], "resume_state")
+        index_status = registry_service.get_space("demo_kg").index_status
+        self.assertIsNotNone(index_status)
+        self.assertEqual(index_status.status, "verified_nonempty")
+        self.assertEqual(index_status.doc_count, 100)
 
 
 if __name__ == "__main__":

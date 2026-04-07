@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
+from app.config import settings
 from app.core.space_context import get_current_space
 from app.schemas.discovery import (
     DiscoveryEntityCandidatesRequest,
@@ -45,6 +46,19 @@ def _apply_discovery_contract(payload: dict):
     return payload
 
 
+def _ensure_discovery_enabled() -> None:
+    if settings.kg_discovery_enabled:
+        return
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "error_code": "KG_DISCOVERY_DISABLED",
+            "message": "graph discovery endpoints are disabled by configuration",
+            "field": "KG_DISCOVERY_ENABLED",
+        },
+    )
+
+
 @router.post("/subgraph", response_model=SubgraphResp)
 def subgraph(req: SubgraphRequest):
     return graph_service.subgraph(req)
@@ -66,16 +80,19 @@ def relation_types(
 
 @router.post("/graph/discovery", response_model=GraphDiscoveryResp)
 def graph_discovery(req: GraphDiscoveryRequest):
+    _ensure_discovery_enabled()
     payload = graph_discovery_service.discovery(req)
     return _apply_discovery_contract(payload)
 
 
 @router.post("/graph/discovery/expand", response_model=GraphDiscoveryExpandResp)
 def graph_discovery_expand(req: GraphDiscoveryExpandRequest):
+    _ensure_discovery_enabled()
     payload = graph_discovery_expand_service.expand(req)
     return _apply_discovery_contract(payload)
 
 
 @router.post("/discovery/entity_candidates", response_model=DiscoveryEntityCandidatesResp)
 def discovery_entity_candidates(req: DiscoveryEntityCandidatesRequest):
+    _ensure_discovery_enabled()
     return discovery_entity_candidate_service.entity_candidates(req)

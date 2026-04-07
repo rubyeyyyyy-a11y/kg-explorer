@@ -7,7 +7,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.imports import executor_service, file_store, import_ngql_service
+from app.services.imports import file_store, import_ngql_service, worker_service
 from app.services.imports.models import ImportBatchItemRecord, ImportBatchRecord, ImportJobState
 from app.services.spaces import registry_service
 from app.services.spaces.models import SpaceSummary
@@ -148,7 +148,6 @@ class ImportApiTest(unittest.TestCase):
     def test_basic_api_chain_upload_preview_draft_validate_job(self):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running"),
             self._client() as client,
         ):
             uploaded = self._upload_csv(client, "vertex.csv", "ID,entity_name,entity_type,source\n1,Alpha,Disease,manual\n")
@@ -195,7 +194,6 @@ class ImportApiTest(unittest.TestCase):
             )
         )
         with (
-            mock.patch("app.services.imports.cleanup_executor_service.ensure_worker_running"),
             self._client() as client,
         ):
             batches = client.get("/api/import/batches")
@@ -409,7 +407,7 @@ class ImportApiTest(unittest.TestCase):
                 created_by_batch=True,
             )
         )
-        with mock.patch("app.services.imports.cleanup_executor_service.ensure_worker_running"), self._client() as client:
+        with self._client() as client:
             created = client.post(
                 "/api/import/batches/cleanup",
                 json={"batch_ids": ["batch_cleanup_api"], "scope": "full_batch", "created_by": "tester"},
@@ -431,6 +429,7 @@ class ImportApiTest(unittest.TestCase):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
             mock.patch("app.services.imports.executor_service.schema_service.apply_schema_plan"),
+            mock.patch("app.services.imports.executor_service.import_ngql_service.vertex_exists", return_value=False),
             mock.patch(
                 "app.services.imports.executor_service.import_ngql_service.import_batch",
                 return_value=_batch_result(successes=[{"kind": "vertex", "vid": 101, "row_index": 1}]),
@@ -454,12 +453,12 @@ class ImportApiTest(unittest.TestCase):
                     "index_status_snapshot": {"status": "verified_nonempty", "doc_count": 1},
                 },
             ),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running", side_effect=executor_service.drain_queue),
             self._client() as client,
         ):
             uploaded = self._upload_csv(client, "vertex.csv", "ID,entity_name,entity_type,source\n1,Alpha,Disease,manual\n")
             draft = self._create_draft(client, mode="vertex", file_ids=[uploaded["file_id"]], mapping=self._vertex_mapping())
             job = client.post("/api/import/jobs", json={"draft_id": draft["draft_id"], "created_by": "tester"}).json()
+            worker_service.run_available_jobs_once()
             detail = client.get(f"/api/import/jobs/{job['job_id']}").json()
 
         self.assertEqual(detail["status"], "succeeded")
@@ -470,6 +469,7 @@ class ImportApiTest(unittest.TestCase):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
             mock.patch("app.services.imports.executor_service.schema_service.apply_schema_plan"),
+            mock.patch("app.services.imports.executor_service.import_ngql_service.edge_exists", return_value=False),
             mock.patch(
                 "app.services.imports.executor_service.import_ngql_service.import_batch",
                 return_value=_batch_result(successes=[{"kind": "edge", "src": 1, "dst": 2, "rank": 0, "row_index": 1}]),
@@ -490,12 +490,12 @@ class ImportApiTest(unittest.TestCase):
                     "index_status_snapshot": {"status": "verified_empty", "doc_count": 0},
                 },
             ),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running", side_effect=executor_service.drain_queue),
             self._client() as client,
         ):
             uploaded = self._upload_csv(client, "edge.csv", "srcVID,dstVID,relation,source\n1,2,rel,manual\n")
             draft = self._create_draft(client, mode="edge", file_ids=[uploaded["file_id"]], mapping=self._edge_mapping())
             job = client.post("/api/import/jobs", json={"draft_id": draft["draft_id"], "created_by": "tester"}).json()
+            worker_service.run_available_jobs_once()
             detail = client.get(f"/api/import/jobs/{job['job_id']}").json()
 
         self.assertEqual(detail["status"], "succeeded")
@@ -642,6 +642,7 @@ class ImportApiTest(unittest.TestCase):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
             mock.patch("app.services.imports.executor_service.schema_service.apply_schema_plan"),
+            mock.patch("app.services.imports.executor_service.import_ngql_service.vertex_exists", return_value=False),
             mock.patch(
                 "app.services.imports.executor_service.import_ngql_service.import_batch",
                 return_value=_batch_result(
@@ -657,7 +658,6 @@ class ImportApiTest(unittest.TestCase):
             ),
             mock.patch("app.services.imports.executor_service.metadata_postprocess_service.refresh_from_db"),
             mock.patch("app.services.imports.executor_service.es_postprocess_service.sync_entities"),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running", side_effect=executor_service.drain_queue),
             self._client() as client,
         ):
             uploaded = self._upload_csv(
@@ -667,6 +667,7 @@ class ImportApiTest(unittest.TestCase):
             )
             draft = self._create_draft(client, mode="vertex", file_ids=[uploaded["file_id"]], mapping=self._vertex_mapping())
             job = client.post("/api/import/jobs", json={"draft_id": draft["draft_id"], "created_by": "tester"}).json()
+            worker_service.run_available_jobs_once()
             download = client.get(f"/api/import/jobs/{job['job_id']}/failed_rows")
 
         self.assertEqual(download.status_code, 200, download.text)
@@ -678,7 +679,6 @@ class ImportApiTest(unittest.TestCase):
     def test_cancel_job_api(self):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running"),
             self._client() as client,
         ):
             uploaded = self._upload_csv(client, "vertex.csv", "ID,entity_name,entity_type,source\n1,Alpha,Disease,manual\n")
@@ -690,7 +690,19 @@ class ImportApiTest(unittest.TestCase):
         self.assertEqual(cancel.status_code, 200, cancel.text)
         self.assertEqual(detail["status"], "cancelled")
 
-    def test_startup_repairs_interrupted_jobs(self):
+    def test_api_startup_does_not_start_background_workers(self):
+        with (
+            mock.patch("app.main.log_process_start"),
+            mock.patch("app.services.imports.executor_service.startup_recover_and_start") as import_worker_mock,
+            mock.patch("app.services.imports.cleanup_executor_service.startup_recover_and_start") as cleanup_worker_mock,
+            self._client(),
+        ):
+            pass
+
+        import_worker_mock.assert_not_called()
+        cleanup_worker_mock.assert_not_called()
+
+    def test_api_startup_keeps_interrupted_jobs_unchanged_until_worker_runs(self):
         job_running = ImportJobState(
             job_id="job_running",
             draft_id="draft_x",
@@ -723,8 +735,8 @@ class ImportApiTest(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200, resp.text)
         statuses = {item["job_id"]: item["status"] for item in resp.json()}
-        self.assertEqual(statuses["job_running"], "failed_import")
-        self.assertEqual(statuses["job_post"], "failed_postprocess")
+        self.assertEqual(statuses["job_running"], "running")
+        self.assertEqual(statuses["job_post"], "post_es_sync")
 
 
 if __name__ == "__main__":

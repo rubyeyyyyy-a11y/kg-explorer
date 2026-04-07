@@ -1,35 +1,24 @@
 import logging
-import os
-import socket
-import time
-import uuid
-from pathlib import Path
-
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 from fastapi.responses import JSONResponse
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(REPO_ROOT / ".env")
-
+from app import runtime_setup  # noqa: F401
 from app import config as app_config
 from app.api import routes_edit
-from app.core.config import ensure_audit_log_dir
 from app.core.space_context import SPACE_HEADER, bind_request_space, reset_current_space
-from app.db import nebula as nebula_db
-from app.db.nebula import execute_ngql
+from app.process_runtime import build_instance_id, log_process_start, prepare_process_runtime
+from app.services import health_service
 from app.routers import detail, graph, imports, search, search_v2, spaces, team_ingestion
-from app.services.imports import cleanup_executor_service, executor_service
-from app.services.spaces import registry_service
+
 
 app = FastAPI(title="KG Entity Search API")
 logger = logging.getLogger(__name__)
 
 
 DEV_INSTANCE_TRACE = app_config.settings.dev_instance_trace
-INSTANCE_ID = f"{Path(__file__).resolve().parents[2].name}:{uuid.uuid4().hex[:12]}"
+INSTANCE_ID = build_instance_id("api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,30 +30,34 @@ app.add_middleware(
 
 
 @app.get("/api/health")
-def health():
-    r = execute_ngql("SHOW HOSTS;", use_space=False)
-    if not r.is_succeeded():
-        raise HTTPException(status_code=500, detail=r.error_msg())
-    return {"ok": True, "hosts_rows": len(r.rows())}
+def health(request: Request):
+    payload, status_code = health_service.build_legacy_response(request)
+    return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
+@app.get("/api/health/live")
+def health_live():
+    payload, status_code = health_service.build_live_response()
+    return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
+@app.get("/api/health/ready")
+def health_ready(request: Request):
+    payload, status_code = health_service.build_ready_response(request)
+    return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
+@app.get("/api/health/dependencies")
+def health_dependencies(request: Request):
+    payload, status_code = health_service.build_dependencies_response(request)
+    return JSONResponse(status_code=status_code, content=payload.model_dump())
 
 
 @app.on_event("startup")
 def startup_prepare():
-    ensure_audit_log_dir()
-    registry_service.register_default_space()
-    logger.warning(
-        "instance_start instance_id=%s repo=%s host=%s edge_type=%s nebula=%s:%s space=%s pid=%d",
-        INSTANCE_ID,
-        str(Path(__file__).resolve().parents[2]),
-        socket.gethostname(),
-        nebula_db.EDGE_TYPE,
-        nebula_db.NEBULA_HOST,
-        nebula_db.NEBULA_PORT,
-        nebula_db.NEBULA_SPACE,
-        os.getpid(),
-    )
-    executor_service.startup_recover_and_start()
-    cleanup_executor_service.startup_recover_and_start()
+    prepare_process_runtime()
+    health_service.mark_startup_complete()
+    log_process_start(process_role="api", instance_id=INSTANCE_ID)
 
 
 @app.middleware("http")
@@ -75,7 +68,10 @@ async def add_instance_header(request: Request, call_next) -> Response:
             content={
                 "detail": {
                     "error_code": "TEAM_INGESTION_SPACE_HEADER_REJECTED",
-                    "message": "team-ingestion V1 rejects external X-KG-Space and always executes in demo_kg",
+                    "message": (
+                        "team-ingestion V1 rejects external X-KG-Space and always executes in "
+                        f"{app_config.settings.kg_default_space}"
+                    ),
                     "field": SPACE_HEADER,
                 }
             },
@@ -90,7 +86,7 @@ async def add_instance_header(request: Request, call_next) -> Response:
             "request_space method=%s path=%s space=%s source=%s registry_status=%s",
             request.method,
             request.url.path,
-            getattr(request.state, "space_name", app_config.settings.nebula_space),
+            getattr(request.state, "space_name", app_config.settings.kg_default_space),
             getattr(resolved, "source", "unknown"),
             getattr(resolved, "registry_status", None),
         )
@@ -99,7 +95,7 @@ async def add_instance_header(request: Request, call_next) -> Response:
         reset_current_space(token)
     if DEV_INSTANCE_TRACE:
         response.headers["X-Instance-Id"] = INSTANCE_ID
-    response.headers["X-KG-Space"] = getattr(request.state, "space_name", app_config.settings.nebula_space)
+    response.headers["X-KG-Space"] = getattr(request.state, "space_name", app_config.settings.kg_default_space)
     return response
 
 

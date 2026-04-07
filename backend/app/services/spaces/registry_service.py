@@ -50,8 +50,8 @@ def _write_registry_unlocked(registry: SpaceRegistry) -> None:
 def _default_space_summary() -> SpaceSummary:
     now = _now_iso()
     return SpaceSummary(
-        space_name=settings.nebula_space,
-        display_name=settings.nebula_space,
+        space_name=settings.kg_default_space,
+        display_name=settings.kg_default_space,
         description="Legacy default single-space bootstrap entry",
         template_type=TEMPLATE_TYPE,
         template_version=TEMPLATE_VERSION,
@@ -66,21 +66,21 @@ def _default_space_summary() -> SpaceSummary:
 
 def _normalize_registry(payload: dict | None) -> SpaceRegistry:
     if not payload:
-        return SpaceRegistry(spaces={settings.nebula_space: _default_space_summary()})
+        return SpaceRegistry(spaces={settings.kg_default_space: _default_space_summary()})
     registry = SpaceRegistry.model_validate(payload)
-    if settings.nebula_space not in registry.spaces:
-        registry.spaces[settings.nebula_space] = _default_space_summary()
+    if settings.kg_default_space not in registry.spaces:
+        registry.spaces[settings.kg_default_space] = _default_space_summary()
     return registry
 
 
 def read_registry() -> SpaceRegistry:
     with _registry_lock():
         if not REGISTRY_PATH.exists():
-            registry = SpaceRegistry(spaces={settings.nebula_space: _default_space_summary()})
+            registry = SpaceRegistry(spaces={settings.kg_default_space: _default_space_summary()})
             _write_registry_unlocked(registry)
             return registry
         registry = _normalize_registry(json.loads(REGISTRY_PATH.read_text(encoding="utf-8")))
-        if settings.nebula_space not in json.loads(REGISTRY_PATH.read_text(encoding="utf-8")).get("spaces", {}):
+        if settings.kg_default_space not in json.loads(REGISTRY_PATH.read_text(encoding="utf-8")).get("spaces", {}):
             _write_registry_unlocked(registry)
         return registry
 
@@ -98,11 +98,11 @@ def _mutate(mutator: Callable[[SpaceRegistry], T]) -> T:
 
 def register_default_space() -> SpaceSummary:
     def _ensure(registry: SpaceRegistry) -> SpaceSummary:
-        existing = registry.spaces.get(settings.nebula_space)
+        existing = registry.spaces.get(settings.kg_default_space)
         if existing is not None:
             return existing
-        registry.spaces[settings.nebula_space] = _default_space_summary()
-        return registry.spaces[settings.nebula_space]
+        registry.spaces[settings.kg_default_space] = _default_space_summary()
+        return registry.spaces[settings.kg_default_space]
 
     return _mutate(_ensure)
 

@@ -561,6 +561,10 @@ def ensure_worker_running() -> None:
     _RUNTIME.ensure_worker_running()
 
 
+def has_queued_records() -> bool:
+    return _RUNTIME.has_queued_records()
+
+
 def startup_recover_and_start() -> None:
     repaired = _RUNTIME.startup_recover_and_start(recover_interrupted=cleanup_service.mark_interrupted_cleanup_jobs)
     if repaired:

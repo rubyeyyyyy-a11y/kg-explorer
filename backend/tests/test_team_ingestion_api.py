@@ -8,7 +8,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.imports import executor_service, file_store, import_ngql_service, job_service
+from app.services.imports import file_store, import_ngql_service, job_service, worker_service
 from app.services.spaces import registry_service
 
 
@@ -118,7 +118,6 @@ class TeamIngestionApiTest(unittest.TestCase):
     def test_submission_creates_system_managed_import_job_in_demo_kg(self):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running"),
             self._client() as client,
         ):
             resp = self._post_submission(client, csv_text=ENTITY_CSV, idempotency_key="idem-1")
@@ -140,7 +139,6 @@ class TeamIngestionApiTest(unittest.TestCase):
     def test_submission_reuses_existing_idempotent_request(self):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running"),
             mock.patch("app.services.team_ingestion.gateway_service.job_service.create_job", wraps=job_service.create_job) as create_job_mock,
             self._client() as client,
         ):
@@ -159,7 +157,6 @@ class TeamIngestionApiTest(unittest.TestCase):
     def test_submission_conflicts_when_idempotency_key_reused_with_different_file(self):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running"),
             self._client() as client,
         ):
             first = self._post_submission(client, csv_text=ENTITY_CSV, idempotency_key="idem-3")
@@ -177,6 +174,7 @@ class TeamIngestionApiTest(unittest.TestCase):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
             mock.patch("app.services.imports.executor_service.schema_service.apply_schema_plan"),
+            mock.patch("app.services.imports.executor_service.import_ngql_service.vertex_exists", return_value=False),
             mock.patch(
                 "app.services.imports.executor_service.import_ngql_service.import_batch",
                 return_value=_batch_result(
@@ -209,12 +207,12 @@ class TeamIngestionApiTest(unittest.TestCase):
                 return_value={"fail_count": 0},
             ),
             mock.patch("app.services.imports.executor_service.es_postprocess_service.post_verify_index"),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running", side_effect=executor_service.drain_queue),
             self._client() as client,
         ):
             created = self._post_submission(client, csv_text=ENTITY_CSV_TWO_ROWS, idempotency_key="idem-4")
             self.assertEqual(created.status_code, 200, created.text)
             payload = created.json()
+            worker_service.run_available_jobs_once()
             failures = client.get(
                 f"/api/v1/team-ingestion/submissions/{payload['submission_id']}/failures",
                 headers=self._auth_headers(),

@@ -8,19 +8,20 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, UploadFile
 
+from app.config import settings
 from app.schemas.team_ingestion import (
     TeamIngestionFailureSummary,
     TeamIngestionSubmissionRecord,
     TeamIngestionSubmissionResp,
 )
-from app.services.imports import draft_service, executor_service, file_store, job_service
+from app.services.imports import draft_service, file_store, job_service
 from app.services.imports.models import ImportFileRecord, ImportJobState
 from app.services.spaces import validation_service
 from app.services.team_ingestion import contract_service, idempotency_store
 from app.services.team_ingestion.adapters.standard_csv_to_draft import build_system_managed_draft_payload
 
 
-TEAM_INGESTION_SPACE_NAME = "demo_kg"
+TEAM_INGESTION_SPACE_NAME = settings.kg_default_space
 _UTF8_BOM = b"\xef\xbb\xbf"
 
 
@@ -302,7 +303,6 @@ async def create_submission(
             is_test_data=False,
             submission_id=record.submission_id,
         )
-        executor_service.ensure_worker_running()
         try:
             job_state = job_service.get_job(job_state.job_id)
         except Exception:

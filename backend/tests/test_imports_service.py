@@ -17,8 +17,10 @@ from app.services.imports import (
     metadata_postprocess_service,
     postprocess_reconcile_service,
     validation_service,
+    worker_service,
 )
 from app.services.imports.models import (
+    CleanupJobRecord,
     CompiledImportPlan,
     CompiledTargetPlan,
     ImportBatchRecord,
@@ -382,7 +384,7 @@ class ImportServiceTest(unittest.TestCase):
 
         repaired = job_service.mark_interrupted_jobs()
         repaired_map = {state.job_id: state.status for state in repaired}
-        self.assertEqual(repaired_map["job_q"], "failed_import")
+        self.assertNotIn("job_q", repaired_map)
         self.assertEqual(repaired_map["job_r"], "failed_import")
         self.assertEqual(repaired_map["job_m"], "failed_postprocess")
         self.assertEqual(repaired_map["job_e"], "failed_postprocess")
@@ -1563,7 +1565,7 @@ class ImportServiceTest(unittest.TestCase):
         self.assertEqual(preview_plan.plan_summary.deletable_entity_count, result.plan_summary.deletable_entity_count)
         self.assertEqual(preview_plan.plan_summary.deletable_relation_count, result.plan_summary.deletable_relation_count)
 
-    def test_cleanup_runtime_startup_recovery_shell_keeps_interrupted_semantics(self):
+    def test_cleanup_runtime_startup_recovery_shell_keeps_queued_jobs_available_for_worker(self):
         from app.services.imports.models import ImportBatchItemRecord
 
         file_store.save_batch_record(
@@ -1598,10 +1600,65 @@ class ImportServiceTest(unittest.TestCase):
 
         updated = file_store.load_cleanup_job(queued_job.cleanup_job_id)
         updated_batch = file_store.load_batch_record("batch_cleanup_runtime")
-        self.assertEqual(updated.status, "failed")
-        self.assertEqual(updated.failure_kind, "process_interrupted")
-        self.assertEqual(updated_batch.cleanup_status, "failed")
-        ensure_worker_mock.assert_not_called()
+        self.assertEqual(updated.status, "queued")
+        self.assertIsNone(updated.failure_kind)
+        self.assertEqual(updated_batch.cleanup_status, "queued")
+        ensure_worker_mock.assert_called_once()
+
+    def test_worker_startup_recovers_running_import_and_cleanup_jobs_only(self):
+        import_state = ImportJobState(
+            job_id="job_running_worker",
+            draft_id="draft_running_worker",
+            status="running",
+            created_by="tester",
+            mode="vertex",
+            plan_id="plan_running_worker",
+            file_ids=[],
+            compiled_plan_path=str(file_store.job_compiled_plan_path("job_running_worker")),
+            failed_rows_path=str(file_store.job_failed_rows_path("job_running_worker")),
+            normalized_rows_path=str(file_store.job_normalized_rows_path("job_running_worker")),
+        )
+        file_store.save_job_state(import_state)
+        cleanup_running = CleanupJobRecord(
+            cleanup_job_id="cleanup_running_worker",
+            space_id="demo_kg",
+            batch_ids=["batch_running_worker"],
+            scope="relations_only",
+            created_by="tester",
+            status="running",
+        )
+        file_store.save_cleanup_job(cleanup_running)
+
+        queued_state = ImportJobState(
+            job_id="job_queued_worker",
+            draft_id="draft_queued_worker",
+            status="queued",
+            created_by="tester",
+            mode="vertex",
+            plan_id="plan_queued_worker",
+            file_ids=[],
+            compiled_plan_path=str(file_store.job_compiled_plan_path("job_queued_worker")),
+            failed_rows_path=str(file_store.job_failed_rows_path("job_queued_worker")),
+            normalized_rows_path=str(file_store.job_normalized_rows_path("job_queued_worker")),
+        )
+        file_store.save_job_state(queued_state)
+
+        with (
+            mock.patch("app.services.imports.executor_service.file_store.cleanup_staging_files", return_value=[]),
+            mock.patch("app.services.imports.executor_service.file_store.cleanup_job_artifacts", return_value=[]),
+            mock.patch.object(executor_service._RUNTIME, "ensure_worker_running"),
+            mock.patch.object(cleanup_executor_service._RUNTIME, "ensure_worker_running"),
+        ):
+            worker_service.startup_recover_and_start()
+
+        recovered_import = file_store.load_job_state("job_running_worker")
+        preserved_queue = file_store.load_job_state("job_queued_worker")
+        recovered_cleanup = file_store.load_cleanup_job(cleanup_running.cleanup_job_id)
+        self.assertEqual(recovered_import.status, "failed_import")
+        self.assertEqual(recovered_import.failure_stage, "interrupted")
+        self.assertEqual(preserved_queue.status, "queued")
+        self.assertEqual(recovered_cleanup.status, "failed")
+        self.assertEqual(recovered_cleanup.failure_kind, "process_interrupted")
 
     def test_cleanup_live_graph_blocker_blocks_entity_even_if_ledger_allows(self):
         from app.services.imports.models import ImportBatchItemRecord

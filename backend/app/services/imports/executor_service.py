@@ -796,6 +796,10 @@ def ensure_worker_running() -> None:
     _RUNTIME.ensure_worker_running()
 
 
+def has_queued_records() -> bool:
+    return _RUNTIME.has_queued_records()
+
+
 def startup_recover_and_start() -> None:
     removed_staging = file_store.cleanup_staging_files()
     removed_artifacts = file_store.cleanup_job_artifacts()

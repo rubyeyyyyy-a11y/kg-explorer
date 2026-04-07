@@ -20,7 +20,7 @@
       "cursor": 5059789,
       "indexed_total": 5059789,
       "last_vid": 5059789,
-      "updated_at": 1773375161,
+      "updated_at": 1775211355,
       "phase": "full_complete",
       "note": "space documents match the canonical ES contract",
       "nebula_entity_count": 5059789,
@@ -42,9 +42,9 @@
           1
         ],
         "timings_ms": {
-          "count_ms": 10.955,
-          "sample_ms": 16.181,
-          "query_ms": 25.604
+          "count_ms": 52.295,
+          "sample_ms": 1325.009,
+          "query_ms": 117.4
         },
         "samples": [
           {

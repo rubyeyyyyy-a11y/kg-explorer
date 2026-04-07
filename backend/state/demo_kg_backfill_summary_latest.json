@@ -1,31 +1,29 @@
 {
-  "generated_at": 1773375161,
+  "generated_at": 1775211355,
   "target_spaces": [
     "demo_kg"
   ],
-  "state_file": "/home/ray/kg-system/backend/state/es_backfill_spaces.state.json",
+  "state_file": "/home/ray/workspace/kg-system/backend/state/es_backfill_spaces.state.json",
   "index_name": "kg_entity",
   "summaries": [
     {
       "space_name": "demo_kg",
-      "strategy": "legacy_es_rewrite",
       "status": "verified_nonempty",
       "note": "space documents match the canonical ES contract",
       "start_cursor": 5059789,
-      "start_last_vid": 2281500,
+      "start_last_vid": 5059789,
       "cursor": 5059789,
       "last_vid": 5059789,
-      "batch_count": 556,
-      "docs": 2778289,
-      "ok_count": 2778289,
+      "batch_count": 0,
+      "docs": 0,
+      "ok_count": 0,
       "fail_count": 0,
-      "legacy_missing_space_doc_count": 5059789,
       "nebula_entity_count": 5059789,
       "nebula_count_ms": 0.0,
-      "nebula_count_source": "metadata_stats",
-      "nebula_count_error": "Socket read failed: timed out",
+      "nebula_count_source": "resume_state",
+      "nebula_count_error": null,
       "es_doc_count": 5059789,
-      "es_count_ms": 36.026,
+      "es_count_ms": 283.379,
       "coverage_pct": 100.0,
       "verify": {
         "ok": true,
@@ -40,9 +38,9 @@
           1
         ],
         "timings_ms": {
-          "count_ms": 10.955,
-          "sample_ms": 16.181,
-          "query_ms": 25.604
+          "count_ms": 52.295,
+          "sample_ms": 1325.009,
+          "query_ms": 117.4
         },
         "samples": [
           {
@@ -83,7 +81,7 @@
           }
         ]
       },
-      "elapsed_s": 580.943,
+      "elapsed_s": 1.917,
       "full_completion": true,
       "remaining_docs": 0,
       "completion_standard": "canonical_es_doc_count must reach nebula_entity_count with verified canonical samples"

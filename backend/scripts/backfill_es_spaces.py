@@ -368,6 +368,105 @@ def _run_legacy_es_rewrite_for_space(
     return summary
 
 
+def _replay_completed_state_if_possible(
+    *,
+    space_name: str,
+    verify: bool,
+    resume: bool,
+    resumed_state: Dict[str, Any],
+    state_path: Path,
+    state_payload: Dict[str, Any],
+    es_client: ElasticsearchClient,
+    index_name: str | None,
+    legacy_doc_count: int,
+) -> Dict[str, Any] | None:
+    if not resume:
+        return None
+    if legacy_doc_count > 0:
+        return None
+
+    resumed_status = str(resumed_state.get("status") or "").strip()
+    if resumed_status not in {"verified_nonempty", "verified_empty"}:
+        return None
+    if not bool(resumed_state.get("full_completion")):
+        return None
+
+    nebula_count_raw = resumed_state.get("nebula_entity_count")
+    if nebula_count_raw is None:
+        return None
+    nebula_count = int(nebula_count_raw)
+
+    start_cursor = int(resumed_state.get("cursor") or 0)
+    start_last_vid = int(resumed_state.get("last_vid") or 0)
+    state_indexed_total = int(resumed_state.get("indexed_total") or start_cursor or 0)
+    started = time.perf_counter()
+
+    es_doc_count, es_count_ms = es_client.count_documents_for_space(space_name, index_name=index_name)
+    verify_result = None
+    if verify:
+        verify_result = indexing_service.verify_space(space_name, es_client=es_client, index_name=index_name)
+
+    status, note = classify_space_status(
+        dry_run=False,
+        fail_count=0,
+        verify_result=verify_result,
+        nebula_count=nebula_count,
+        es_doc_count=es_doc_count,
+    )
+    coverage_pct = 100.0 if nebula_count <= 0 else round((float(es_doc_count) / float(nebula_count)) * 100.0, 2)
+    completion_snapshot = index_status_service.build_completion_snapshot(
+        status=status,
+        nebula_entity_count=nebula_count,
+        es_doc_count=es_doc_count,
+        coverage_pct=coverage_pct,
+    )
+    summary = {
+        "space_name": space_name,
+        "status": status,
+        "note": note,
+        "start_cursor": start_cursor,
+        "start_last_vid": start_last_vid,
+        "cursor": start_cursor,
+        "last_vid": start_last_vid,
+        "batch_count": 0,
+        "docs": 0,
+        "ok_count": 0,
+        "fail_count": 0,
+        "nebula_entity_count": nebula_count,
+        "nebula_count_ms": 0.0,
+        "nebula_count_source": "resume_state",
+        "nebula_count_error": None,
+        "es_doc_count": es_doc_count,
+        "es_count_ms": round(es_count_ms, 3),
+        "coverage_pct": coverage_pct,
+        "verify": verify_result,
+        "elapsed_s": round(time.perf_counter() - started, 3),
+        **completion_snapshot,
+    }
+    print(
+        f"[backfill] space={space_name} strategy=resume_state_verify status={status} full_completion={summary['full_completion']} remaining_docs={summary['remaining_docs']} es_doc_count={es_doc_count} nebula_entity_count={nebula_count} coverage_pct={coverage_pct} note={note}"
+    )
+    index_status_service.update_index_status_from_summary(space_name, summary)
+    update_space_state(
+        state_payload,
+        space_name=space_name,
+        cursor=start_cursor,
+        indexed_total=state_indexed_total,
+        last_vid=start_last_vid,
+        phase="full_complete" if summary["full_completion"] else ("failed" if status == "failed" else "verified_partial"),
+        status=status,
+        note=note,
+        es_doc_count=es_doc_count,
+        nebula_entity_count=nebula_count,
+        coverage_pct=coverage_pct,
+        full_completion=summary["full_completion"],
+        remaining_docs=summary["remaining_docs"] if summary["remaining_docs"] is not None else None,
+        verify_result=verify_result,
+    )
+    write_state(state_path, state_payload)
+    return summary
+
+
 def run_backfill_for_space(
     space_name: str,
     *,
@@ -397,6 +496,20 @@ def run_backfill_for_space(
         )
 
     resumed_state = dict((state_payload.get("spaces") or {}).get(space_name) or {})
+    replayed_summary = _replay_completed_state_if_possible(
+        space_name=space_name,
+        verify=verify,
+        resume=resume,
+        resumed_state=resumed_state,
+        state_path=state_path,
+        state_payload=state_payload,
+        es_client=es_client,
+        index_name=index_name,
+        legacy_doc_count=legacy_doc_count,
+    )
+    if replayed_summary is not None:
+        return replayed_summary
+
     start_cursor = int(resumed_state.get("cursor") or 0) if resume else 0
     start_last_vid = int(resumed_state.get("last_vid") or 0) if resume else 0
     resumed_indexed_total = int(resumed_state.get("indexed_total") or start_cursor or 0) if resume else 0

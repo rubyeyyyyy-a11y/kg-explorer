@@ -7,7 +7,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.imports import executor_service, file_store
+from app.services.imports import file_store, import_ngql_service, worker_service
 from app.services.spaces import registry_service
 from app.services.spaces.models import SpaceSummary
 
@@ -33,6 +33,17 @@ SCHEMA_FIXTURE = {
         }
     ],
 }
+
+
+def _batch_result(*, successes=None, failures=None, used_fallback=False):
+    success_items = list(successes or [])
+    failure_items = list(failures or [])
+    return import_ngql_service.BatchImportResult(
+        successes=success_items,
+        failures=failure_items,
+        batch_statement_count=max(1, len(success_items) + len(failure_items)) if (success_items or failure_items) else 0,
+        used_fallback=used_fallback,
+    )
 
 
 class ImportJobClosureContractTest(unittest.TestCase):
@@ -141,7 +152,11 @@ class ImportJobClosureContractTest(unittest.TestCase):
         with (
             mock.patch("app.services.imports.schema_service.introspect_schema", return_value=SCHEMA_FIXTURE),
             mock.patch("app.services.imports.executor_service.schema_service.apply_schema_plan"),
-            mock.patch("app.services.imports.executor_service.import_ngql_service.import_row", return_value={"kind": "vertex", "vid": 101}),
+            mock.patch("app.services.imports.executor_service.import_ngql_service.vertex_exists", return_value=False),
+            mock.patch(
+                "app.services.imports.executor_service.import_ngql_service.import_batch",
+                return_value=_batch_result(successes=[{"kind": "vertex", "vid": 101, "row_index": 1}]),
+            ),
             mock.patch("app.services.imports.executor_service.metadata_postprocess_service.refresh_from_db"),
             mock.patch(
                 "app.services.imports.executor_service.es_postprocess_service.sync_entities",
@@ -151,7 +166,6 @@ class ImportJobClosureContractTest(unittest.TestCase):
                 "app.services.imports.executor_service.es_postprocess_service.post_verify_index",
                 side_effect=post_verify_side_effect,
             ),
-            mock.patch("app.services.imports.executor_service.ensure_worker_running", side_effect=executor_service.drain_queue),
             self._client() as client,
         ):
             demo_headers = {}
@@ -186,6 +200,7 @@ class ImportJobClosureContractTest(unittest.TestCase):
             )
             self.assertEqual(small_job.status_code, 200, small_job.text)
             small_job_id = small_job.json()["job_id"]
+            worker_service.run_available_jobs_once()
 
             demo_detail = client.get(f"/api/import/jobs/{demo_job_id}", headers=demo_headers)
             small_detail = client.get(f"/api/import/jobs/{small_job_id}", headers=small_headers)

@@ -1,6 +1,7 @@
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from app.config import settings
 from app.core.space_context import get_current_space
 from app.schemas.imports import (
     CleanupJobResp,
@@ -24,10 +25,8 @@ from app.schemas.imports import (
     ImportSchemaResp,
 )
 from app.services.imports import (
-    cleanup_executor_service,
     cleanup_service,
     draft_service,
-    executor_service,
     job_service,
     postprocess_reconcile_service,
     preview_service,
@@ -41,6 +40,15 @@ router = APIRouter(prefix="/api/import")
 
 
 def _require_ready_import_space() -> str:
+    if not settings.kg_import_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "KG_IMPORT_DISABLED",
+                "message": "import endpoints are disabled by configuration",
+                "field": "KG_IMPORT_ENABLED",
+            },
+        )
     space_name = get_current_space()
     validation_service.ensure_space_ready(space_name)
     return space_name
@@ -124,7 +132,6 @@ def validate_import_draft(draft_id: str):
 def create_import_job(req: ImportJobCreateRequest):
     _require_ready_import_space()
     state = job_service.create_job(draft_id=req.draft_id, created_by=req.created_by, is_test_data=req.is_test_data)
-    executor_service.ensure_worker_running()
     return state.model_dump()
 
 
@@ -173,7 +180,6 @@ def get_import_batch_items(batch_id: str):
 def create_import_cleanup_job(req: ImportBatchCleanupRequest):
     _require_ready_import_space()
     record = cleanup_service.create_cleanup_job(batch_ids=req.batch_ids, scope=req.scope, created_by=req.created_by)
-    cleanup_executor_service.ensure_worker_running()
     return record.model_dump()
 
 

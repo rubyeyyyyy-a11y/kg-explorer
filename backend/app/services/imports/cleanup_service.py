@@ -182,7 +182,7 @@ def preview_cleanup_plan(
 def mark_interrupted_cleanup_jobs() -> list[CleanupJobRecord]:
     repaired: list[CleanupJobRecord] = []
     for record in cleanup_state.list_cleanup_jobs():
-        if record.status not in {"queued", "running"}:
+        if record.status != "running":
             continue
         record.status = "failed"
         record.phase = "failed"

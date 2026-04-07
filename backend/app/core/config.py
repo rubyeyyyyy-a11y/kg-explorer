@@ -3,8 +3,8 @@ from pathlib import Path
 
 from app.config import settings
 
-SPACE = settings.nebula_space
-EDGE_TYPE = os.getenv("EDGE_TYPE", "REL2").strip() or "REL2"
+SPACE = settings.kg_default_space
+EDGE_TYPE = settings.edge_type
 UPDATED_AT_UNIT = "seconds"
 
 # Relative to backend/ working directory.

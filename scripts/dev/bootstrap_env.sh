@@ -1,41 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
-echo "[env] root=$ROOT"
+info "repo_root=$ROOT"
+info "onex_frontend_root=$ONEX_FRONTEND_ROOT"
+info "kg_platform_app_root=$KG_PLATFORM_APP_ROOT"
 
-command -v python3 >/dev/null 2>&1 || {
-  echo "[env] python3 not found" >&2
-  exit 1
-}
-command -v node >/dev/null 2>&1 || {
-  echo "[env] node not found" >&2
-  exit 1
-}
-command -v npm >/dev/null 2>&1 || {
-  echo "[env] npm not found" >&2
-  exit 1
-}
+ensure_command python3
+ensure_command node
+ensure_command pnpm
 
 cd "$ROOT/backend"
 if [ ! -d ".venv" ]; then
-  echo "[env] creating backend/.venv"
+  info "creating backend/.venv"
   python3 -m venv .venv
 fi
-echo "[env] installing backend dependencies"
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
 
-cd "$ROOT/frontend"
-if [ -f "package-lock.json" ]; then
-  echo "[env] installing frontend dependencies with npm ci"
-  npm ci
-else
-  echo "[env] installing frontend dependencies with npm install"
-  npm install
-fi
+info "installing backend dependencies"
+"$BACKEND_PYTHON_BIN" -m pip install --upgrade pip
+"$BACKEND_PYTHON_BIN" -m pip install -r requirements.txt
 
-echo "[env] done"
-echo "[env] backend python: $ROOT/backend/.venv/bin/python"
-echo "[env] frontend node_modules: $ROOT/frontend/node_modules"
+cd "$ONEX_FRONTEND_ROOT"
+info "installing onex-frontend workspace dependencies with pnpm"
+pnpm install
+
+info "done"
+info "backend python=$BACKEND_PYTHON_BIN"
+info "kg-platform umi entry=$KG_PLATFORM_UMI_ENTRY"

@@ -8,6 +8,24 @@ class ElasticsearchSpaceAwareTest(unittest.TestCase):
     def test_document_id_uses_space_prefix(self):
         self.assertEqual(ElasticsearchClient.document_id("space_a", 42), "space_a:42")
 
+    def test_loopback_es_url_bypasses_system_proxy(self):
+        client = ElasticsearchClient(base_url="http://127.0.0.1:9200")
+        fake_response = mock.MagicMock()
+        fake_response.read.return_value = b'{"status":"green"}'
+        fake_opener = mock.MagicMock()
+        fake_opener.open.return_value.__enter__.return_value = fake_response
+
+        with (
+            mock.patch("app.clients.es_client.build_opener", return_value=fake_opener) as build_opener_mock,
+            mock.patch("app.clients.es_client.urlopen") as urlopen_mock,
+        ):
+            payload, _took_ms = client._request_json("GET", "/_cluster/health")
+
+        build_opener_mock.assert_called_once()
+        fake_opener.open.assert_called_once()
+        urlopen_mock.assert_not_called()
+        self.assertEqual(payload["status"], "green")
+
     def test_search_query_includes_space_filter(self):
         client = ElasticsearchClient()
         captured = {}
