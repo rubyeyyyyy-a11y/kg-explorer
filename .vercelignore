@@ -1,6 +1,6 @@
 # This portfolio Demo is a static, read-only derivative. Keep the historic API
 # proxy out of deployment; data is emitted under frontend/public/demo-data.
-api/
+/api/
 data-import/
 backend/
 runtime/
