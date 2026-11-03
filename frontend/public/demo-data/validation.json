@@ -1,0 +1,97 @@
+{
+  "manifest_nodes_match_index": true,
+  "global_duplicate_entity_ids": false,
+  "global_relation_count_matches": true,
+  "orphan_edges": 0,
+  "synthetic_entities_or_relations": false,
+  "cross_topic_ids_consistent": true,
+  "evidence": {
+    "unique_records": 37571,
+    "relation_associations": 42006,
+    "entity_associations": 79666,
+    "relations_with_raw_evidence": 6556,
+    "entity_description_rows": 1105,
+    "entity_source_identifier_rows": 5000,
+    "prohibited_public_fields": [],
+    "invalid_relation_references": [],
+    "raw_evidence_identifier_mismatches": [],
+    "duplicate_publication_record_conflicts": [],
+    "malformed_records": [],
+    "node_literature_coverage": {
+      "nodes_with_explicit_pmid_or_doi": 454,
+      "nodes_with_raw_evidence": 2781,
+      "sampled_node_count": 4395,
+      "explicit_identifier_pct": 10.33,
+      "raw_evidence_pct": 63.28
+    },
+    "manifest_matches": true
+  },
+  "topics": [
+    {
+      "id": "myelofibrosis-jak2",
+      "nodes": 1000,
+      "relations": 4162,
+      "duplicate_entity_ids": false,
+      "orphan_edges": 0,
+      "has_seed": true,
+      "connected_target_met": true,
+      "has_multiple_seeds": true,
+      "has_relation_categories": true,
+      "has_real_multi_hop_paths": true,
+      "evidence_references_resolve": true
+    },
+    {
+      "id": "hypercalciuria-mechanism",
+      "nodes": 1000,
+      "relations": 1749,
+      "duplicate_entity_ids": false,
+      "orphan_edges": 0,
+      "has_seed": true,
+      "connected_target_met": true,
+      "has_multiple_seeds": true,
+      "has_relation_categories": true,
+      "has_real_multi_hop_paths": true,
+      "evidence_references_resolve": true
+    },
+    {
+      "id": "saxagliptin-dpp4",
+      "nodes": 1000,
+      "relations": 2428,
+      "duplicate_entity_ids": false,
+      "orphan_edges": 0,
+      "has_seed": true,
+      "connected_target_met": true,
+      "has_multiple_seeds": true,
+      "has_relation_categories": true,
+      "has_real_multi_hop_paths": true,
+      "evidence_references_resolve": true
+    },
+    {
+      "id": "squamous-expression",
+      "nodes": 1000,
+      "relations": 2169,
+      "duplicate_entity_ids": false,
+      "orphan_edges": 0,
+      "has_seed": true,
+      "connected_target_met": true,
+      "has_multiple_seeds": true,
+      "has_relation_categories": true,
+      "has_real_multi_hop_paths": true,
+      "evidence_references_resolve": true
+    },
+    {
+      "id": "gastric-egfr-treatment",
+      "nodes": 1000,
+      "relations": 3265,
+      "duplicate_entity_ids": false,
+      "orphan_edges": 0,
+      "has_seed": true,
+      "connected_target_met": true,
+      "has_multiple_seeds": true,
+      "has_relation_categories": true,
+      "has_real_multi_hop_paths": true,
+      "evidence_references_resolve": true
+    }
+  ],
+  "asset_bytes": 41939473
+}

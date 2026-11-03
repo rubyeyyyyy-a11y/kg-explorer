@@ -1,0 +1,45 @@
+{
+  "name": "kg-search-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19 <25"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:e2e": "vite --host ${E2E_FRONTEND_HOST:-127.0.0.1} --port ${E2E_FRONTEND_PORT:-4173} --strictPort",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "e2e": "NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost playwright test",
+    "e2e:smoke": "NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost playwright test --grep @smoke",
+    "e2e:import-mock": "NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost E2E_SKIP_BACKEND_CHECK=1 E2E_REUSE_EXISTING_SERVER=1 playwright test e2e/specs/08-import-minimal.spec.ts e2e/specs/09-import-batches-cleanup.spec.ts",
+    "e2e:quick-cleanup": "NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost E2E_SKIP_BACKEND_CHECK=1 E2E_REUSE_EXISTING_SERVER=1 playwright test e2e/specs/09-import-batches-cleanup.spec.ts --grep @quick-cleanup",
+    "e2e:headed": "NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost playwright test --headed",
+    "e2e:install": "playwright install chromium",
+    "demo:research-trail": "node ../scripts/research_trail_acceptance.mjs",
+    "demo:layered-parity": "node ../scripts/layered_multiseed_parity.mjs",
+    "demo:ui-refinement": "node ../scripts/ui_refinement_acceptance.mjs"
+  },
+  "dependencies": {
+    "@antv/g6": "^5.0.51",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.55.1",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.48.0",
+    "vite": "^7.3.1"
+  }
+}
