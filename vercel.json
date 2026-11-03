@@ -3,19 +3,5 @@
   "framework": "vite",
   "installCommand": "cd frontend && npm ci",
   "buildCommand": "cd frontend && npm run build",
-  "outputDirectory": "frontend/dist",
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "/api/[...path]"
-    },
-    {
-      "source": "/",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/:path((?!api/).*)",
-      "destination": "/index.html"
-    }
-  ]
+  "outputDirectory": "frontend/dist"
 }

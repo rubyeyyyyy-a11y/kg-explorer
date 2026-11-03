@@ -1,5 +1,5 @@
-import AppShell from "./app/AppShell";
+import PortfolioDemoApp from "./portfolio/PortfolioDemoApp";
 
 export default function App() {
-  return <AppShell />;
+  return <PortfolioDemoApp />;
 }

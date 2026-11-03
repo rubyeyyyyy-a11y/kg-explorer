@@ -35,6 +35,8 @@ export type NodeBrief = {
   seed_support_vids?: number[];
   score_breakdown?: Record<string, unknown>;
   source_tags?: string[];
+  /** Local presentation hint used by the static Research Trail canvas. */
+  showLabel?: boolean;
 };
 
 export type EdgeBrief = {

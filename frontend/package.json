@@ -14,7 +14,10 @@
     "e2e:import-mock": "NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost E2E_SKIP_BACKEND_CHECK=1 E2E_REUSE_EXISTING_SERVER=1 playwright test e2e/specs/08-import-minimal.spec.ts e2e/specs/09-import-batches-cleanup.spec.ts",
     "e2e:quick-cleanup": "NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost E2E_SKIP_BACKEND_CHECK=1 E2E_REUSE_EXISTING_SERVER=1 playwright test e2e/specs/09-import-batches-cleanup.spec.ts --grep @quick-cleanup",
     "e2e:headed": "NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost playwright test --headed",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "demo:research-trail": "node ../scripts/research_trail_acceptance.mjs",
+    "demo:layered-parity": "node ../scripts/layered_multiseed_parity.mjs",
+    "demo:ui-refinement": "node ../scripts/ui_refinement_acceptance.mjs"
   },
   "dependencies": {
     "@antv/g6": "^5.0.51",

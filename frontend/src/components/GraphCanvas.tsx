@@ -115,6 +115,7 @@ type GraphCanvasProps = {
     positions: Record<string, { x: number; y: number }>,
     source?: CachedNodePosition["source"]
   ) => void;
+  onGraphRendered?: (snapshot: { nodeIds: string[]; edgeIds: string[]; positions: Record<string, { x: number; y: number }>; transform: { x: number; y: number; zoom: number }; layoutMode: GraphLayoutPlan["mode"] }) => void;
   containerStyle?: CSSProperties;
   registerApplyHighlight?: (
     fn: (nextNodeId: string | null, nextEdgeId: string | null, force?: boolean) => void
@@ -135,6 +136,7 @@ export function GraphCanvas({
   onNodeClick,
   onEdgeClick,
   onNodePositionChange,
+  onGraphRendered,
   containerStyle,
   registerApplyHighlight,
 }: GraphCanvasProps) {
@@ -143,8 +145,14 @@ export function GraphCanvas({
   const viewModelRef = useRef<GraphViewModel>(viewModel);
   const edgeByIdRef = useRef<Map<string, EdgeBrief>>(viewModel.edgeById);
   const onNodePositionChangeRef = useRef<typeof onNodePositionChange>(onNodePositionChange);
+  const onGraphRenderedRef = useRef<typeof onGraphRendered>(onGraphRendered);
   const selectedNodeIdRef = useRef<string | null>(null);
   const selectedEdgeIdRef = useRef<string | null>(null);
+  // A viewport request is part of the render transaction.  Keeping it in a ref
+  // lets the async G6 commit use the newest intent after data and layout settle.
+  // Previously the React effect below could run before `graph.render()` finished,
+  // leaving a new focus highlighted but still outside the user's viewport.
+  const viewportRequestRef = useRef<GraphViewportRequest>(viewportRequest);
 
   const renderNodeLabelsRef = useRef(true);
   const renderEdgeLabelsRef = useRef(false);
@@ -159,6 +167,8 @@ export function GraphCanvas({
   const pendingFullRenderAfterResizeRef = useRef(false);
   const pendingFitAfterResizeRef = useRef(false);
   const graphHasRenderedRef = useRef(false);
+  const renderTransactionRef = useRef(0);
+  const renderQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [graphReadySequence, setGraphReadySequence] = useState(0);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
 
@@ -298,6 +308,14 @@ export function GraphCanvas({
   }, [onNodePositionChange]);
 
   useEffect(() => {
+    onGraphRenderedRef.current = onGraphRendered;
+  }, [onGraphRendered]);
+
+  useEffect(() => {
+    viewportRequestRef.current = viewportRequest;
+  }, [viewportRequest]);
+
+  useEffect(() => {
     renderNodeLabelsRef.current = renderNodeLabels;
   }, [renderNodeLabels]);
 
@@ -320,7 +338,18 @@ export function GraphCanvas({
     const prevNodeId = selectedNodeIdRef.current;
     const prevEdgeId = selectedEdgeIdRef.current;
 
+    const hasLiveElement = (id: string) => {
+      try {
+        if (typeof g.getElementData === "function") return Boolean(g.getElementData(id));
+        const exists = [...(g.getNodeData?.() ?? []), ...(g.getEdgeData?.() ?? [])]
+          .some((item: { id?: string }) => String(item.id) === id);
+        return exists;
+      } catch {
+        return false;
+      }
+    };
     const safeSetState = (id: string, state: unknown[]) => {
+      if (!hasLiveElement(id)) return;
       try {
         g.setElementState(id, state);
       } catch {
@@ -328,6 +357,7 @@ export function GraphCanvas({
       }
     };
     const safeZ = (id: string, z: number) => {
+      if (!hasLiveElement(id)) return;
       try {
         g.setElementZIndex(id, z);
       } catch {
@@ -356,13 +386,22 @@ export function GraphCanvas({
     if (force && !nextEdgeId && prevEdgeId) safeSetState(prevEdgeId, []);
   }
 
-  function focusNode(nodeId: string) {
+  async function focusNode(nodeId: string) {
     applyHighlight(nodeId, null, true);
     const g: any = graphRef.current;
-    if (!g) return;
+    if (!g || g.destroyed) return;
+    try {
+      const hasNode = (g.getNodeData?.() ?? []).some((node: { id?: string }) => String(node.id) === nodeId);
+      // A topic switch can replace the model while React is processing a stale
+      // focus request.  G6 throws asynchronously when asked to focus a node
+      // already removed by that replacement, so ignore that obsolete request.
+      if (!hasNode) return;
+    } catch {
+      return;
+    }
     try {
       if (typeof g.focusElement === "function") {
-        g.focusElement(nodeId, true);
+        await g.focusElement(nodeId, false);
         return;
       }
     } catch {
@@ -370,7 +409,7 @@ export function GraphCanvas({
     }
     try {
       if (typeof g.focusItem === "function") {
-        g.focusItem(nodeId, true);
+        await g.focusItem(nodeId, false);
         return;
       }
     } catch {
@@ -413,9 +452,11 @@ export function GraphCanvas({
         node: {
           type: TWO_LINE_NODE_TYPE,
           style: {
-            labelText: (d: any) => (renderNodeLabelsRef.current ? String(d.label || "") : ""),
+            labelText: (d: any) => (
+              renderNodeLabelsRef.current && d?.data?.showLabel !== false ? String(d.label || "") : ""
+            ),
             subtitleText: (d: any) =>
-              renderNodeLabelsRef.current ? String(d?.data?.entity_type || "") : "",
+              renderNodeLabelsRef.current && d?.data?.showLabel !== false ? String(d?.data?.entity_type || "") : "",
             size: (d: any) => {
               if (isSeedNode(d)) return 33;
               const lvl = Number(d?.data?.hopLevel ?? 99);
@@ -502,6 +543,7 @@ export function GraphCanvas({
       });
 
       graphRef.current.on("node:click", (evt: any) => {
+        debugLog("node-click", { targetId: evt?.target?.id, itemId: evt?.item?.id, itemType: evt?.item?.type });
         const itemId =
           evt?.target?.id ??
           evt?.item?.id ??
@@ -640,9 +682,16 @@ export function GraphCanvas({
     // Keep render aligned with latest container size; avoids stale canvas after layout changes.
     resizeGraphToContainer();
     const graph = graphRef.current as any;
+    const renderTransaction = ++renderTransactionRef.current;
     const applyPatch = async () => {
-      const needsFullRender =
-        renderPatch.isInitial || !graphHasRenderedRef.current || pendingFullRenderAfterResizeRef.current;
+      if (renderTransaction !== renderTransactionRef.current) return;
+      // A reroot replaces the local research subgraph.  Treat it as a complete data
+      // transaction rather than allowing an incremental patch to retain stale items.
+      // This product has a deliberately small static graph budget (50 nodes / 140
+      // edges). Replacing the authoritative model is safer than overlapping G6
+      // incremental mutations, which can retain stale elements when a reroot and
+      // an expand happen in quick succession.
+      const needsFullRender = true;
 
       if (needsFullRender) {
         graph.setData(toG6Data(viewModel));
@@ -729,9 +778,30 @@ export function GraphCanvas({
         pendingFitAfterResizeRef.current = false;
         scheduleFitView(reason);
       }
+
+      // Focus only after the replacement data and its layout have committed. This
+      // is deliberately in the same transaction as setData/render, rather than a
+      // competing useEffect, so reroot is observable as both a model change and a
+      // visible viewport change.
+      const viewportIntent = viewportRequestRef.current;
+      if (viewportIntent.mode === "focus-node" && viewportIntent.nodeId) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await focusNode(viewportIntent.nodeId);
+      }
+
+      const liveNodeIds = (() => {
+        try { return (graph.getNodeData?.() ?? []).map((node: { id?: string }) => String(node.id)); }
+        catch { return viewModel.nodes.map((node) => node.id); }
+      })();
+      const liveEdgeIds = (() => {
+        try { return (graph.getEdgeData?.() ?? []).map((edge: { id?: string }) => String(edge.id)); }
+        catch { return viewModel.edges.map((edge) => edge.id); }
+      })();
+      const graphPosition = graph.getPosition?.() ?? [0, 0];
+      onGraphRenderedRef.current?.({ nodeIds: liveNodeIds, edgeIds: liveEdgeIds, positions: collectNodePositions(liveNodeIds), transform: { x: Number(graphPosition[0]) || 0, y: Number(graphPosition[1]) || 0, zoom: Number(graph.getZoom?.()) || 1 }, layoutMode: layoutPlan.mode });
     };
 
-    void applyPatch();
+    renderQueueRef.current = renderQueueRef.current.catch(() => undefined).then(applyPatch);
   }, [containerSize.height, containerSize.width, graphReadySequence, layoutPlan, renderPatch, viewModel]);
 
   useEffect(() => {
@@ -753,7 +823,7 @@ export function GraphCanvas({
   useEffect(() => {
     if (!graphRef.current) return;
     if (viewportRequest.mode !== "focus-node" || !viewportRequest.nodeId) return;
-    focusNode(viewportRequest.nodeId);
+    void focusNode(viewportRequest.nodeId);
   }, [viewportRequest]);
 
   useEffect(() => {
